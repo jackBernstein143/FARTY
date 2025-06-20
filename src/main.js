@@ -40,8 +40,136 @@ let finalVideoUrl = null;
 let totalFrames = 0;
 const frameRate = 30;
 
-// File selection
-videoInput.addEventListener('change', (e) => {
+// SIMPLIFIED MOBILE-FRIENDLY VIDEO COMPRESSION:
+async function compressVideoForMobile(file) {
+    return new Promise((resolve, reject) => {
+        const video = document.createElement('video');
+        
+        video.onloadedmetadata = async () => {
+            try {
+                const fileSizeMB = file.size / (1024 * 1024);
+                const isLargeFile = fileSizeMB > 25;
+                const isHighRes = video.videoWidth > 1080 || video.videoHeight > 1080;
+                
+                // If file is already small and reasonable resolution, don't compress
+                if (!isLargeFile && !isHighRes) {
+                    console.log(`File is good size (${fileSizeMB.toFixed(1)}MB), no compression needed`);
+                    resolve(file);
+                    return;
+                }
+                
+                console.log(`Starting simple compression: ${fileSizeMB.toFixed(1)}MB`);
+                
+                // Use HTMLCanvasElement.captureStream() for simpler compression
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                // Scale down resolution if needed
+                let targetWidth = video.videoWidth;
+                let targetHeight = video.videoHeight;
+                
+                if (Math.max(targetWidth, targetHeight) > 1080) {
+                    const scale = 1080 / Math.max(targetWidth, targetHeight);
+                    targetWidth = Math.floor(targetWidth * scale / 2) * 2;
+                    targetHeight = Math.floor(targetHeight * scale / 2) * 2;
+                }
+                
+                canvas.width = targetWidth;
+                canvas.height = targetHeight;
+                
+                // Check if MediaRecorder is supported
+                if (!MediaRecorder.isTypeSupported('video/webm')) {
+                    console.log('WebM not supported, using original file');
+                    resolve(file);
+                    return;
+                }
+                
+                const stream = canvas.captureStream(15); // Lower frame rate for mobile
+                const mediaRecorder = new MediaRecorder(stream, {
+                    mimeType: 'video/webm',
+                    videoBitsPerSecond: 1000000 // Lower bitrate for mobile (1 Mbps)
+                });
+                
+                const chunks = [];
+                let timeout;
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        chunks.push(event.data);
+                    }
+                };
+                
+                mediaRecorder.onstop = () => {
+                    clearTimeout(timeout);
+                    const compressedBlob = new Blob(chunks, { type: 'video/webm' });
+                    const compressedFile = new File([compressedBlob], 
+                        file.name.replace(/\.[^/.]+$/, '.webm'), 
+                        { type: 'video/webm' }
+                    );
+                    
+                    const compressedSizeMB = compressedFile.size / (1024 * 1024);
+                    console.log(`Mobile compression done: ${compressedSizeMB.toFixed(1)}MB`);
+                    resolve(compressedFile);
+                };
+                
+                mediaRecorder.onerror = (error) => {
+                    clearTimeout(timeout);
+                    console.error('MediaRecorder error:', error);
+                    resolve(file); // Fall back to original
+                };
+                
+                // Timeout after 30 seconds
+                timeout = setTimeout(() => {
+                    console.log('Compression timeout, using original file');
+                    mediaRecorder.stop();
+                    resolve(file);
+                }, 30000);
+                
+                mediaRecorder.start();
+                
+                // Simple playback approach - just play the video and let canvas capture it
+                video.play();
+                
+                // Draw frames while video plays
+                const drawFrame = () => {
+                    if (video.paused || video.ended) {
+                        mediaRecorder.stop();
+                        return;
+                    }
+                    
+                    ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
+                    requestAnimationFrame(drawFrame);
+                };
+                
+                video.onplay = () => {
+                    drawFrame();
+                };
+                
+                // Stop after video duration or 10 seconds max
+                setTimeout(() => {
+                    video.pause();
+                    mediaRecorder.stop();
+                }, Math.min(video.duration * 1000, 10000));
+                
+            } catch (error) {
+                console.error('Compression failed:', error);
+                resolve(file);
+            }
+        };
+        
+        video.onerror = () => {
+            console.log('Video load failed, using original');
+            resolve(file);
+        };
+        
+        video.src = URL.createObjectURL(file);
+        video.muted = true; // Required for autoplay
+        video.playsInline = true; // Important for mobile
+    });
+}
+
+// ENHANCED FILE SELECTION HANDLER WITH REAL COMPRESSION:
+videoInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
@@ -50,10 +178,39 @@ videoInput.addEventListener('change', (e) => {
         videoForm.reset();
         return;
     }
-    currentVideoFile = file; // Save the file for later upload
-    displayVideo(file);
+
+    const fileSizeMB = file.size / (1024 * 1024);
+    console.log(`Original file: ${fileSizeMB.toFixed(1)}MB`);
+
+    // Always show loading for potential compression
+    if (fileSizeMB > 10) { // Show compression UI for files > 10MB
+        loading.classList.remove('hidden');
+        loading.querySelector('p').textContent = `Optimizing ${fileSizeMB.toFixed(1)}MB video file...`;
+        
+        try {
+            currentVideoFile = await compressVideoForMobile(file);
+            const compressedSizeMB = currentVideoFile.size / (1024 * 1024);
+            
+            // Update loading text to show compression results
+            if (compressedSizeMB < fileSizeMB * 0.8) { // If compression saved >20%
+                loading.querySelector('p').textContent = `Compressed to ${compressedSizeMB.toFixed(1)}MB! Processing will be faster.`;
+                setTimeout(() => loading.classList.add('hidden'), 2000); // Show success for 2 seconds
+            } else {
+                loading.classList.add('hidden');
+            }
+        } catch (error) {
+            console.error('Video compression failed:', error);
+            currentVideoFile = file; // Use original if compression fails
+            loading.classList.add('hidden');
+        }
+    } else {
+        currentVideoFile = file; // Small files don't need compression
+    }
+    
+    displayVideo(currentVideoFile);
 });
 
+// KEEP ALL YOUR EXISTING FUNCTIONS BELOW (displayVideo, updateScrubber, etc.)
 function displayVideo(file) {
     if (currentVideo && currentVideo.src) {
         URL.revokeObjectURL(currentVideo.src);
@@ -122,7 +279,7 @@ async function extractCurrentFrame() {
     });
 }
 
-// Generate AI image
+// Generate AI image - KEEP YOUR EXISTING FUNCTION HERE
 generateBtn.addEventListener('click', async () => {
     if (!currentVideo || !currentVideoFile) return;
 
@@ -142,8 +299,8 @@ generateBtn.addEventListener('click', async () => {
         }
         const outputImageBase64 = imageResult.data.outputImage;
 
-        // Step 2: Upload BOTH video and generated image to Storage
-        loadingText.textContent = 'Uploading assets...';
+        // Step 2: Upload original video to Storage
+        loadingText.textContent = 'Uploading video...';
         const uniqueId = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
         
         // Upload video
@@ -163,7 +320,7 @@ generateBtn.addEventListener('click', async () => {
         
         const payload = {
             originalVideoPath: videoPath,
-            generatedImagePath: imagePath, // Use storage path instead of base64
+            generatedImagePath: imagePath,
             cutTimestamp: cutTimestamp
         };
 
@@ -201,6 +358,7 @@ generateBtn.addEventListener('click', async () => {
     }
 });
 
+// KEEP ALL YOUR OTHER EXISTING FUNCTIONS (resetToAction, downloadVideoBtn, etc.)
 function resetToAction() {
     loading.classList.add('hidden');
     resultActions.classList.add('hidden');
