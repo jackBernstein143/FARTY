@@ -2,53 +2,53 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>FARTY - AI Video Transform</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>💨 FARTY</h1>
-        <p class="subtitle">AI Video Transform</p>
-        
-        <div class="media-toggle">
-            <button class="toggle-btn active" data-type="image">📷 Image</button>
-            <button class="toggle-btn" data-type="video">🎬 Video</button>
+    <div class="app-container">
+        <div class="header">
+            <h1>💨 FARTY</h1>
+            <p class="subtitle">AI Video Transform</p>
         </div>
         
-        <div class="upload-section">
-            <input type="file" id="mediaInput" accept="image/*" />
-            <label for="mediaInput" class="upload-btn" id="uploadLabel">
-                📁 Select Image
-            </label>
-        </div>
-        
-        <div class="media-container" id="mediaContainer">
-            <div class="placeholder-text" id="placeholderText">
-                Select an image to transform with AI
+        <div class="video-section">
+            <form id="videoForm">
+                <div class="video-container" id="videoContainer">
+                    <input type="file" id="videoInput" accept="video/*" />
+                    <label for="videoInput" class="video-placeholder" id="videoPlaceholder">
+                        <div class="placeholder-icon">🎬</div>
+                        <div class="placeholder-text">Tap to select video</div>
+                        <div class="placeholder-hint">Portrait videos work best</div>
+                    </label>
+                    <div class="video-wrapper" id="videoWrapper"></div>
+                </div>
+            </form>
+            
+            <div class="video-controls hidden" id="videoControls">
+                <div class="scrubber-container">
+                    <input type="range" class="scrubber" id="scrubber" min="0" max="100" value="0" />
+                    <div class="time-display" id="timeDisplay">0:00 / 0:00</div>
+                </div>
             </div>
         </div>
         
-        <div class="video-controls hidden" id="videoControls">
-            <div class="scrubber-container">
-                <input type="range" class="scrubber" id="scrubber" min="0" max="100" value="0" />
-                <div class="time-display" id="timeDisplay">0:00 / 0:00</div>
+        <div class="action-section">
+            <button class="generate-btn" id="generateBtn" disabled>
+                ✨ Generate AI Video
+            </button>
+            
+            <div class="loading hidden" id="loading">
+                <div class="spinner"></div>
+                <p>AI is transforming your video...</p>
             </div>
-        </div>
-        
-        <button class="generate-btn" id="generateBtn" disabled>
-            ✨ Generate AI Image
-        </button>
-        
-        <div class="loading hidden" id="loading">
-            <div class="spinner"></div>
-            <p>AI is transforming your media...</p>
-        </div>
-        
-        <div class="action-buttons hidden" id="actionButtons">
-            <button class="action-btn download-btn" id="downloadBtn">📥 Download</button>
-            <button class="action-btn share-btn" id="shareBtn">📤 Share</button>
-            <button class="action-btn reset-btn" id="resetBtn">🔄 Reset</button>
+            
+            <div class="result-actions hidden" id="resultActions">
+                <button class="action-btn download-btn" id="downloadBtn">📥 Download</button>
+                <button class="action-btn share-btn" id="shareBtn">📤 Share</button>
+                <button class="action-btn reset-btn" id="resetBtn">🔄 New Video</button>
+            </div>
         </div>
     </div>
 

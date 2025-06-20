@@ -16,297 +16,212 @@ const app = initializeApp(firebaseConfig);
 const functions = getFunctions(app);
 const fartyImage = httpsCallable(functions, 'fartyImage');
 
-// DOM elements
-const toggleBtns = document.querySelectorAll('.toggle-btn');
-const mediaInput = document.getElementById('mediaInput');
-const uploadLabel = document.getElementById('uploadLabel');
-const mediaContainer = document.getElementById('mediaContainer');
-const placeholderText = document.getElementById('placeholderText');
+const videoForm = document.getElementById('videoForm');
+const videoInput = document.getElementById('videoInput');
+const videoContainer = document.getElementById('videoContainer');
+const videoWrapper = document.getElementById('videoWrapper');
 const videoControls = document.getElementById('videoControls');
 const scrubber = document.getElementById('scrubber');
 const timeDisplay = document.getElementById('timeDisplay');
 const generateBtn = document.getElementById('generateBtn');
 const loading = document.getElementById('loading');
-const actionButtons = document.getElementById('actionButtons');
+const resultActions = document.getElementById('resultActions');
 const downloadBtn = document.getElementById('downloadBtn');
 const shareBtn = document.getElementById('shareBtn');
 const resetBtn = document.getElementById('resetBtn');
 
-let currentMode = 'image';
-let selectedFile = null;
 let currentVideo = null;
 let generatedImageUrl = null;
 let totalFrames = 0;
-let frameRate = 30;
-
-// Media type toggle
-toggleBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-        toggleBtns.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        currentMode = btn.dataset.type;
-        
-        if (currentMode === 'image') {
-            mediaInput.accept = 'image/*';
-            uploadLabel.textContent = '📁 Select Image';
-            placeholderText.textContent = 'Select an image to transform with AI';
-        } else {
-            mediaInput.accept = 'video/*';
-            uploadLabel.textContent = '🎬 Select Video';
-            placeholderText.textContent = 'Select a video to choose frame from';
-        }
-        
-        resetApp();
-    });
-});
+const frameRate = 30;
 
 // File selection
-mediaInput.addEventListener('change', (e) => {
+videoInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    selectedFile = file;
-    
-    if (currentMode === 'image' && file.type.startsWith('image/')) {
-        displayImage(file);
-    } else if (currentMode === 'video' && file.type.startsWith('video/')) {
-        displayVideo(file);
-    } else {
-        alert(`Please select a valid ${currentMode} file`);
+    if (!file.type.startsWith('video/')) {
+        alert('Please select a valid video file');
+        videoForm.reset();
+        return;
     }
+    displayVideo(file);
 });
 
-function displayImage(file) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        showMedia('image', e.target.result);
-        generateBtn.disabled = false;
-    };
-    reader.readAsDataURL(file);
-}
-
 function displayVideo(file) {
+    if (currentVideo && currentVideo.src) {
+        URL.revokeObjectURL(currentVideo.src);
+    }
+
     const url = URL.createObjectURL(file);
     const video = document.createElement('video');
     video.src = url;
-    video.controls = false;
+    video.className = 'video-preview';
     video.muted = true;
-    video.preload = 'metadata';
     video.playsInline = true;
-    
+    video.preload = 'metadata';
+
     video.addEventListener('loadedmetadata', () => {
-        console.log('Video metadata loaded:', {
-            duration: video.duration,
-            videoWidth: video.videoWidth,
-            videoHeight: video.videoHeight
-        });
-        
-        frameRate = 30;
         totalFrames = Math.floor(video.duration * frameRate);
-        
-        scrubber.min = 0;
-        scrubber.max = totalFrames - 1;
-        scrubber.step = 1;
+        scrubber.max = totalFrames > 0 ? totalFrames - 1 : 0;
         scrubber.value = 0;
-        
         updateTimeDisplay();
-        generateBtn.disabled = false; // Enable generate button for videos
+        generateBtn.disabled = false;
         video.currentTime = 0;
     });
-    
+
     currentVideo = video;
-    showMedia('video', video);
+    videoContainer.classList.add('has-video');
+    videoWrapper.innerHTML = '';
+    videoWrapper.appendChild(video);
+    videoWrapper.classList.add('active');
     videoControls.classList.remove('hidden');
 }
 
-function showMedia(type, content) {
-    mediaContainer.classList.add('has-media');
-    placeholderText.style.display = 'none';
-    
-    // Clear previous content
-    const existingMedia = mediaContainer.querySelector('img, video');
-    if (existingMedia) existingMedia.remove();
-    
-    if (type === 'image') {
-        const img = document.createElement('img');
-        img.src = content;
-        img.className = 'media-preview';
-        mediaContainer.appendChild(img);
-    } else {
-        content.className = 'media-preview';
-        mediaContainer.appendChild(content);
-    }
+// Video controls
+function updateScrubber() {
+    if (!currentVideo) return;
+    const frameNumber = parseInt(scrubber.value);
+    currentVideo.currentTime = frameNumber / frameRate;
+    updateTimeDisplay(frameNumber);
 }
 
-// Video controls
-scrubber.addEventListener('input', (e) => {
-    if (currentVideo) {
-        const frameNumber = parseInt(e.target.value);
-        const timeInSeconds = frameNumber / frameRate;
-        currentVideo.currentTime = timeInSeconds;
-        updateTimeDisplay(frameNumber);
-    }
-});
+scrubber.addEventListener('input', updateScrubber);
+scrubber.addEventListener('change', updateScrubber);
 
-scrubber.addEventListener('change', (e) => {
-    if (currentVideo) {
-        const frameNumber = parseInt(e.target.value);
-        const timeInSeconds = frameNumber / frameRate;
-        currentVideo.currentTime = timeInSeconds;
-        updateTimeDisplay(frameNumber);
-    }
-});
-
-function updateTimeDisplay(frameNumber = null) {
-    if (currentVideo) {
-        const currentFrame = frameNumber !== null ? frameNumber : Math.floor(currentVideo.currentTime * frameRate);
-        const currentTime = currentFrame / frameRate;
-        const totalTime = currentVideo.duration;
-        
-        const current = formatTime(currentTime);
-        const total = formatTime(totalTime);
-        
-        timeDisplay.textContent = `${current} / ${total} (Frame ${currentFrame + 1}/${totalFrames})`;
-    }
+function updateTimeDisplay(frame = null) {
+    if (!currentVideo || !isFinite(currentVideo.duration)) return;
+    const currentFrame = frame !== null ? frame : Math.floor(currentVideo.currentTime * frameRate);
+    const currentTime = currentFrame / frameRate;
+    const totalTime = currentVideo.duration;
+    
+    timeDisplay.textContent = `${formatTime(currentTime)} / ${formatTime(totalTime)}`;
 }
 
 function formatTime(seconds) {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
-    const ms = Math.floor((seconds % 1) * 100);
-    return `${mins}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
 // Extract current frame from video
 async function extractCurrentFrame() {
     return new Promise((resolve) => {
-        setTimeout(() => {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            
-            canvas.width = currentVideo.videoWidth;
-            canvas.height = currentVideo.videoHeight;
-            ctx.drawImage(currentVideo, 0, 0);
-            
-            canvas.toBlob((blob) => {
-                const extractedFrame = new File([blob], 'frame.jpg', { type: 'image/jpeg' });
-                const currentFrame = Math.floor(currentVideo.currentTime * frameRate);
-                console.log(`Frame ${currentFrame + 1} extracted for AI processing`);
-                resolve(extractedFrame);
-            }, 'image/jpeg', 0.9);
-        }, 100);
+        const canvas = document.createElement('canvas');
+        canvas.width = currentVideo.videoWidth;
+        canvas.height = currentVideo.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(currentVideo, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.95);
     });
 }
 
 // Generate AI image
 generateBtn.addEventListener('click', async () => {
-    let fileToProcess = selectedFile;
-    
-    // If we have a video, extract the current frame first
-    if (currentVideo && currentMode === 'video') {
-        try {
-            fileToProcess = await extractCurrentFrame();
-        } catch (err) {
-            console.error('Failed to extract frame:', err);
-            alert('Failed to extract video frame');
-            return;
-        }
-    }
-    
-    if (!fileToProcess) return;
-    
+    if (!currentVideo) return;
+
+    generateBtn.style.display = 'none';
+    loading.classList.remove('hidden');
+
     try {
-        loading.classList.remove('hidden');
-        generateBtn.disabled = true;
-        
-        const base64Image = await fileToBase64(fileToProcess);
-        
-        const response = await fartyImage({
-            base64Image: base64Image,
-            promptStyle: 'cryptopunk'
-        });
-        
-        if (response.data && response.data.outputImage) {
-            generatedImageUrl = `data:image/jpeg;base64,${response.data.outputImage}`;
+        const frameBlob = await extractCurrentFrame();
+        const base64Image = await blobToBase64(frameBlob);
+        const result = await fartyImage({ base64Image: base64Image });
+
+        if (result.data && result.data.outputImage) {
+            generatedImageUrl = `data:image/jpeg;base64,${result.data.outputImage}`;
+
+            // Create and display the new image, replacing the video
+            const img = document.createElement('img');
+            img.src = generatedImageUrl;
+            img.className = 'video-preview generated-image';
             
-            // Replace current media with generated image
-            showMedia('image', generatedImageUrl);
-            videoControls.classList.add('hidden'); // Hide video controls after generation
-            actionButtons.classList.remove('hidden');
-            
-            console.log('Image generation successful!');
+            videoWrapper.innerHTML = ''; // Clear the video
+            videoWrapper.appendChild(img); // Add the image
+
+            // Hide video controls and show result actions
+            videoControls.classList.add('hidden');
+            loading.classList.add('hidden');
+            resultActions.classList.remove('hidden');
         } else {
-            throw new Error('No image returned from function');
+            throw new Error('No valid image data received from AI service');
         }
-        
-    } catch (err) {
-        console.error('Generation error:', err);
-        alert(`Error: ${err.message}`);
-        generateBtn.disabled = false; // Re-enable on error
-    } finally {
-        loading.classList.add('hidden');
-        generateBtn.style.display = 'none'; // Hide generate button after use
+    } catch (error) {
+        console.error('Error generating AI image:', error);
+        alert('Could not generate AI image. Please try again.');
+        resetToAction();
     }
 });
 
-// Action buttons
+function resetToAction() {
+    loading.classList.add('hidden');
+    resultActions.classList.add('hidden');
+    generateBtn.style.display = 'block';
+}
+
+// Download result
 downloadBtn.addEventListener('click', () => {
-    if (generatedImageUrl) {
-        const a = document.createElement('a');
-        a.href = generatedImageUrl;
-        a.download = 'farty-generated-image.jpg';
-        a.click();
-    }
+    if (!generatedImageUrl) return;
+    const link = document.createElement('a');
+    link.href = generatedImageUrl;
+    link.download = 'farty-ai-image.jpg';
+    link.click();
 });
 
+// Share result
 shareBtn.addEventListener('click', async () => {
-    if (generatedImageUrl && navigator.share) {
-        try {
-            const response = await fetch(generatedImageUrl);
-            const blob = await response.blob();
-            const file = new File([blob], 'farty-image.jpg', { type: 'image/jpeg' });
-            
-            await navigator.share({
-                files: [file],
-                title: 'FARTY AI Generated Image'
-            });
-        } catch (err) {
-            console.log('Share failed:', err);
-            downloadBtn.click();
-        }
-    } else {
-        downloadBtn.click();
+    if (!generatedImageUrl) return;
+    try {
+        if (!navigator.share) throw new Error('Web Share API not supported.');
+        await navigator.share({
+            title: 'FARTY AI Video Transform',
+            text: 'Check out this AI-transformed video!',
+            url: generatedImageUrl
+        });
+    } catch (error) {
+        console.log('Share failed, copying to clipboard:', error);
+        copyToClipboard(generatedImageUrl);
     }
 });
 
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        alert('Link copied to clipboard!');
+    }, () => {
+        alert('Failed to copy link.');
+    });
+}
+
+// Reset app
 resetBtn.addEventListener('click', resetApp);
 
 function resetApp() {
-    selectedFile = null;
+    if (currentVideo && currentVideo.src) {
+        currentVideo.pause();
+        URL.revokeObjectURL(currentVideo.src);
+    }
     currentVideo = null;
     generatedImageUrl = null;
-    totalFrames = 0;
-    frameRate = 30;
     
-    mediaContainer.classList.remove('has-media');
-    placeholderText.style.display = 'block';
+    videoContainer.classList.remove('has-video');
+    videoWrapper.classList.remove('active');
+    videoWrapper.innerHTML = '';
     videoControls.classList.add('hidden');
-    actionButtons.classList.add('hidden');
-    generateBtn.style.display = 'block';
+    
+    resetToAction();
     generateBtn.disabled = true;
     
-    const existingMedia = mediaContainer.querySelector('img, video');
-    if (existingMedia) existingMedia.remove();
-    
-    mediaInput.value = '';
+    videoForm.reset();
 }
 
-async function fileToBase64(file) {
+function blobToBase64(blob) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = () => resolve(reader.result.split(',')[1]);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(blob);
+        reader.onloadend = () => {
+            resolve(reader.result.split(',')[1]);
+        };
+        reader.onerror = error => reject(error);
     });
 }
 
