@@ -1,5 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
 import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-functions.js';
+import { getStorage, ref, uploadBytes } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js';
 
 // Firebase config
 const firebaseConfig = {
@@ -14,7 +15,10 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const functions = getFunctions(app);
+const storage = getStorage(app);
+
 const fartyImage = httpsCallable(functions, 'fartyImage');
+const createFartyVideo = httpsCallable(functions, 'createFartyVideo');
 
 const videoForm = document.getElementById('videoForm');
 const videoInput = document.getElementById('videoInput');
@@ -26,12 +30,13 @@ const timeDisplay = document.getElementById('timeDisplay');
 const generateBtn = document.getElementById('generateBtn');
 const loading = document.getElementById('loading');
 const resultActions = document.getElementById('resultActions');
-const downloadBtn = document.getElementById('downloadBtn');
-const shareBtn = document.getElementById('shareBtn');
+const downloadVideoBtn = document.getElementById('downloadVideoBtn');
+const shareVideoBtn = document.getElementById('shareVideoBtn');
 const resetBtn = document.getElementById('resetBtn');
 
 let currentVideo = null;
-let generatedImageUrl = null;
+let currentVideoFile = null;
+let finalVideoUrl = null;
 let totalFrames = 0;
 const frameRate = 30;
 
@@ -45,6 +50,7 @@ videoInput.addEventListener('change', (e) => {
         videoForm.reset();
         return;
     }
+    currentVideoFile = file; // Save the file for later upload
     displayVideo(file);
 });
 
@@ -118,37 +124,79 @@ async function extractCurrentFrame() {
 
 // Generate AI image
 generateBtn.addEventListener('click', async () => {
-    if (!currentVideo) return;
+    if (!currentVideo || !currentVideoFile) return;
 
     generateBtn.style.display = 'none';
     loading.classList.remove('hidden');
+    const loadingText = loading.querySelector('p');
+    loadingText.textContent = 'Generating AI image...';
 
     try {
+        // Step 1: Generate the AI image from the current frame
         const frameBlob = await extractCurrentFrame();
         const base64Image = await blobToBase64(frameBlob);
-        const result = await fartyImage({ base64Image: base64Image });
+        const imageResult = await fartyImage({ base64Image: base64Image });
 
-        if (result.data && result.data.outputImage) {
-            generatedImageUrl = `data:image/jpeg;base64,${result.data.outputImage}`;
-
-            // Create and display the new image, replacing the video
-            const img = document.createElement('img');
-            img.src = generatedImageUrl;
-            img.className = 'video-preview generated-image';
-            
-            videoWrapper.innerHTML = ''; // Clear the video
-            videoWrapper.appendChild(img); // Add the image
-
-            // Hide video controls and show result actions
-            videoControls.classList.add('hidden');
-            loading.classList.add('hidden');
-            resultActions.classList.remove('hidden');
-        } else {
-            throw new Error('No valid image data received from AI service');
+        if (!imageResult.data || !imageResult.data.outputImage) {
+            throw new Error('AI image generation failed to return an image.');
         }
+        const outputImageBase64 = imageResult.data.outputImage;
+
+        // Step 2: Upload BOTH video and generated image to Storage
+        loadingText.textContent = 'Uploading assets...';
+        const uniqueId = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
+        
+        // Upload video
+        const videoPath = `uploads/video-${uniqueId}.mp4`;
+        const videoStorageRef = ref(storage, videoPath);
+        await uploadBytes(videoStorageRef, currentVideoFile);
+
+        // Upload generated image
+        const imagePath = `uploads/image-${uniqueId}.jpg`;
+        const imageStorageRef = ref(storage, imagePath);
+        const imageBlob = await (await fetch(`data:image/jpeg;base64,${outputImageBase64}`)).blob();
+        await uploadBytes(imageStorageRef, imageBlob);
+
+        // Step 3: Call the stitching function with storage paths
+        loadingText.textContent = 'Stitching final video...';
+        const cutTimestamp = currentVideo.currentTime;
+        
+        const payload = {
+            originalVideoPath: videoPath,
+            generatedImagePath: imagePath, // Use storage path instead of base64
+            cutTimestamp: cutTimestamp
+        };
+
+        console.log('DEBUG: Payload sent to createFartyVideo:', {
+            originalVideoPath: payload.originalVideoPath,
+            generatedImagePath: payload.generatedImagePath,
+            cutTimestamp: payload.cutTimestamp
+        });
+
+        const stitchResult = await createFartyVideo(payload);
+
+        if (!stitchResult.data || !stitchResult.data.url) {
+            throw new Error('Video stitching failed to return a URL.');
+        }
+
+        // Final Step: Display the new stitched video
+        finalVideoUrl = stitchResult.data.url;
+        const finalVideo = document.createElement('video');
+        finalVideo.src = finalVideoUrl;
+        finalVideo.className = 'video-preview';
+        finalVideo.controls = true;
+        finalVideo.autoplay = true;
+
+        videoWrapper.innerHTML = '';
+        videoWrapper.appendChild(finalVideo);
+        videoControls.classList.add('hidden');
+        loading.classList.add('hidden');
+        resultActions.classList.remove('hidden');
+
     } catch (error) {
-        console.error('Error generating AI image:', error);
-        alert('Could not generate AI image. Please try again.');
+        console.error('Error in the generation process:', error);
+        console.error('Full error object:', error);
+        alert(`Could not create the final video: ${error.message}`);
         resetToAction();
     }
 });
@@ -160,27 +208,27 @@ function resetToAction() {
 }
 
 // Download result
-downloadBtn.addEventListener('click', () => {
-    if (!generatedImageUrl) return;
+downloadVideoBtn.addEventListener('click', () => {
+    if (!finalVideoUrl) return;
     const link = document.createElement('a');
-    link.href = generatedImageUrl;
-    link.download = 'farty-ai-image.jpg';
+    link.href = finalVideoUrl;
+    link.download = 'farty-video.mp4';
     link.click();
 });
 
 // Share result
-shareBtn.addEventListener('click', async () => {
-    if (!generatedImageUrl) return;
+shareVideoBtn.addEventListener('click', async () => {
+    if (!finalVideoUrl) return;
     try {
         if (!navigator.share) throw new Error('Web Share API not supported.');
         await navigator.share({
-            title: 'FARTY AI Video Transform',
+            title: 'FARTY AI Video',
             text: 'Check out this AI-transformed video!',
-            url: generatedImageUrl
+            url: finalVideoUrl
         });
     } catch (error) {
         console.log('Share failed, copying to clipboard:', error);
-        copyToClipboard(generatedImageUrl);
+        copyToClipboard(finalVideoUrl);
     }
 });
 
@@ -201,7 +249,8 @@ function resetApp() {
         URL.revokeObjectURL(currentVideo.src);
     }
     currentVideo = null;
-    generatedImageUrl = null;
+    currentVideoFile = null;
+    finalVideoUrl = null;
     
     videoContainer.classList.remove('has-video');
     videoWrapper.classList.remove('active');
